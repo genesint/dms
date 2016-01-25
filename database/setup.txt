@@ -1,0 +1,3 @@
+CREATE DATABASE nomaddms CHARACTER SET utf8 COLLATE utf8_general_ci;
+GRANT ALL ON nomaddms.* TO nomaddms@localhost IDENTIFIED BY 'nomaddms.2016';
+FLUSH PRIVILEGES;
