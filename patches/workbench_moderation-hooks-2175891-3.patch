@@ -1,0 +1,209 @@
+diff --git a/workbench_moderation.api.php b/workbench_moderation.api.php
+index 4b2afc6..9e0377e 100644
+--- a/workbench_moderation.api.php
++++ b/workbench_moderation.api.php
+@@ -66,3 +66,71 @@ function hook_workbench_moderation_states_next_alter(&$states, $current_state, $
+ function hook_workbench_moderation_transition($node, $previous_state, $new_state) {
+   // Your code here.
+ }
++
++/**
++ * Allows modules to respond when a transition is saved.
++ *
++ * @param object $state
++ *   The state which was just saved.
++ * @param int $status
++ *   Either MergeQuery::STATUS_INSERT or MergeQuery::STATUS_UPDATE depending
++ *   on if this INSERT'ing a new transation or UPDATE'ing an existing one.
++ */
++function hook_workbench_moderation_state_save($state, $status) {
++  if ($status == MergeQuery::STATUS_INSERT) {
++    // Add data to a custom table for each new transition.
++    db_insert('mytable')
++      ->fields(array(
++        'state' => $state->name,
++      ))
++      ->execute();
++  }
++}
++
++/**
++ * Allows modules to respond when a transition is saved.
++ *
++ * @param object $transition
++ *   The transition which was just saved.
++ * @param int $status
++ *   Either MergeQuery::STATUS_INSERT or MergeQuery::STATUS_UPDATE depending
++ *   on if this INSERT'ing a new transation or UPDATE'ing an existing one.
++ */
++function hook_workbench_moderation_transition_save($transition, $status) {
++  if ($status == MergeQuery::STATUS_INSERT) {
++    // Add data to a custom table for each new transition.
++    db_insert('mytable')
++      ->fields(array(
++        'from_state' => $transition->from_name,
++        'to_state' => $transition->to_name,
++      ))
++      ->execute();
++  }
++}
++
++/**
++ * Allows modules to respond when a state is deleted.
++ *
++ * @param object $state
++ *  The state which was just deleted.
++ */
++function hook_workbench_moderation_state_delete($state) {
++  // Remove data from a custom table which refers to the old state.
++  db_delete('mytable')
++    ->condition('state', $state->name)
++    ->execute();
++}
++
++/**
++ * Allows modules to respond when a transition is deleted.
++ *
++ * @param object $transition
++ *  The transition which was just deleted.
++ */
++function hook_workbench_moderation_transition_delete($transition) {
++  // Remove data from a custom table which refers to the old state.
++  db_delete('mytable')
++    ->condition('from_state', $transition->from_name)
++    ->condition('to_state', $transition->to_name)
++    ->execute();
++}
+diff --git a/workbench_moderation.module b/workbench_moderation.module
+index f510e2e..264b089 100644
+--- a/workbench_moderation.module
++++ b/workbench_moderation.module
+@@ -1290,16 +1290,31 @@ function workbench_moderation_state_load($machine_name) {
+  * Moderation state names must be unique, so saving a state object with a
+  * non-unique name updates the existing state.
+  *
+- * @TODO: add a hook here.
++ * Invokes hook_workbench_moderation_state_save().
+  *
+  * @param $state
+  *   An object with name, description, and weight properties.
++ *
++ * @return int
++ *   Returns MergeQuery::STATUS_INSERT or MergeQuery::STATUS_UPDATE depending
++ *   on if this INSERT'ing a new transation or UPDATE'ing an existing one.
++ *
++ * @see hook_workbench_moderation_state_save()
+  */
+ function workbench_moderation_state_save($state) {
+-  return db_merge('workbench_moderation_states')
++  $status = db_merge('workbench_moderation_states')
+     ->key(array('name' => $state->name))
+     ->fields((array) $state)
+     ->execute();
++
++  foreach (module_implements('workbench_moderation_state_save') as $module) {
++    // Don't call this function! That would lead to infinite recursion.
++    if ($module !== 'workbench_moderation') {
++      module_invoke($module, 'workbench_moderation_state_save', $state, $status);
++    }
++  }
++
++  return $status;
+ }
+ 
+ /**
+@@ -1308,20 +1323,35 @@ function workbench_moderation_state_save($state) {
+  * This function also deletes any transitions that reference the deleted
+  * moderation state.
+  *
+- * @TODO: add a hook here.
++ * Invokes hook_workbench_moderation_state_delete().
+  *
+  * @param $state
+  *   An object with at least a name property.
+  *
++ * @see hook_workbench_moderation_state_delete().
++ * @see hook_workbench_moderation_transition_delete().
+  */
+ function workbench_moderation_state_delete($state) {
++  foreach (module_implements('workbench_moderation_state_delete') as $module) {
++    // Don't call this function! That would lead to infinite recursion.
++    if ($module !== 'workbench_moderation') {
++      module_invoke($module, 'workbench_moderation_state_delete', $state);
++    }
++  }
++
+   db_delete('workbench_moderation_states')
+     ->condition('name', $state->name)
+     ->execute();
+ 
+-  db_delete('workbench_moderation_transitions')
++  // Delete related transitions, too.
++  $query = db_select('workbench_moderation_transitions', 't')
++    ->fields('t')
+     ->condition(db_or()->condition('from_name', $state->name)->condition('to_name', $state->name))
+     ->execute();
++
++  while ($transition = $query->fetchObject()) {
++    workbench_moderation_transition_delete($transition);
++  }
+ }
+ 
+ /**
+@@ -1353,29 +1383,53 @@ function workbench_moderation_transitions() {
+ /**
+  * Saves a moderation state transition.
+  *
+- * @TODO: add a hook here.
++ * Invokes hook_workbench_moderation_transition_save().
+  *
+  * @param $transition
+  *   An object with from_name and to_name properties that reference moderation
+  *   states.
++ *
++ * @return int
++ *   Returns MergeQuery::STATUS_INSERT or MergeQuery::STATUS_UPDATE depending
++ *   on if this INSERT'ing a new transation or UPDATE'ing an existing one.
++ *
++ * @see hook_workbench_moderation_transition_save()
+  */
+ function workbench_moderation_transition_save($transition) {
+-  return db_merge('workbench_moderation_transitions')
++  $status = db_merge('workbench_moderation_transitions')
+     ->key(array('from_name' => $transition->from_name, 'to_name' => $transition->to_name))
+     ->fields((array) $transition)
+     ->execute();
++
++  foreach (module_implements('workbench_moderation_transition_save') as $module) {
++    // Don't call this function! That would lead to infinite recursion.
++    if ($module !== 'workbench_moderation') {
++      module_invoke($module, 'workbench_moderation_transition_save', $transition, $status);
++    }
++  }
++
++  return $status;
+ }
+ 
+ /**
+  * Deletes a moderation state transition.
+  *
+- * @TODO: add a hook here.
++ * Invoke hook_workbenech_moderation_tranisiton_delete().
+  *
+  * @param $transition
+  *   An object with from_name and to_name properties that reference moderation
+  *   states.
++ *
++ * @see hook_workbench_moderation_transition_delete().
+  */
+ function workbench_moderation_transition_delete($transition) {
++  foreach (module_implements('workbench_moderation_transition_delete') as $module) {
++    // Don't call this function! That would lead to infinite recursion.
++    if ($module !== 'workbench_moderation') {
++      module_invoke($module, 'workbench_moderation_transition_delete', $transition);
++    }
++  }
++
+   db_delete('workbench_moderation_transitions')
+     ->condition('from_name', $transition->from_name)
+     ->condition('to_name', $transition->to_name)
