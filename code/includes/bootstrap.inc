@@ -2534,23 +2534,6 @@ function drupal_get_bootstrap_phase() {
 }
 
 /**
- * Returns whether a simpletest is running or peparing to run.
- *
- * @param $set
- *   Set whether a test is running.
- *
- * @return
- *   TRUE if test is running, false otherwise.
- */
-function drupal_test_running($set = NULL) {
-  static $test_running = NULL;
-  if (isset($set)) {
-    $test_running = $set;
-  }
-  return isset($test_running) ? $test_running : (bool)drupal_valid_test_ua();
-}
-
-/**
  * Returns the test prefix if this is an internal request from SimpleTest.
  *
  * @return
@@ -3200,7 +3183,7 @@ function _registry_check_code($type, $name = NULL) {
   $cache_key = $type[0] . $name;
   if (isset($lookup_cache[$cache_key])) {
     if ($lookup_cache[$cache_key]) {
-      include_once DRUPAL_ROOT . '/' . $lookup_cache[$cache_key];
+      require_once DRUPAL_ROOT . '/' . $lookup_cache[$cache_key];
     }
     return (bool) $lookup_cache[$cache_key];
   }
@@ -3225,7 +3208,7 @@ function _registry_check_code($type, $name = NULL) {
   $lookup_cache[$cache_key] = $file;
 
   if ($file) {
-    include_once DRUPAL_ROOT . '/' . $file;
+    require_once DRUPAL_ROOT . '/' . $file;
     return TRUE;
   }
   else {
